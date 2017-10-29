@@ -1,0 +1,422 @@
+---
+title: "Exploring the potential and suitability of using natural language processing (NLP) to systematize analysis of SenseMaker narratives"
+author:
+- affiliation: The Data Atelier
+  email: anna.h@thedataatelier.com
+  name: Anna Hanchar, PhD
+date: 26 October 2017
+output:
+  html_notebook:
+    toc: yes
+  html_document: default
+  pdf_document: 
+    toc: yes
+  word_document: 
+    toc: yes
+---
+# Background reading
+
+A general introduction to natural language processing (NLP) in development context:
+
+- Our recent paper "Data Innovation for International Development: An overview of natural language processing for qualitative data anlaysis" in proceedings of the Frontiers and Advances of Data Science IEEE Conference. Available from ArXiv https://arxiv.org/abs/1709.05563
+
+Good, introductory overview papers about NLP and its application:
+
+- Lucas et al., "Computer-Assisted Text Analysis for Comparative Politics", Political Analysis, 2015, 23: 254-277. Available here: http://christopherlucas.org/files/PDFs/text_comp_politics.pdf
+
+- Grimmer and Stewart, "Text as Data: The Promise and Pitfalls of Automatic Content Analysis Methods for Political Texts", Political Analysis, 2013. Available here: 
+http://web.stanford.edu/~jgrimmer/tad2.pdf
+
+Introductory tutorial on "quanteda" package: https://cran.r-project.org/web/packages/quanteda/vignettes/quickstart.html
+
+Introduction to R Markdown and R Notebooks environment (used for transparent and reproducible research): http://rmarkdown.rstudio.com and http://rmarkdown.rstudio.com/r_notebooks.html
+
+An excellent introduction to R and data science can be found here:
+
+- Garrett Grolemund and Hadley Wickham (2016) _R for Data Science_, O'Reilly Media. Note: Online version is available from the authors' page [here](http://r4ds.had.co.nz/index.html).
+
+# Step 1: Loading packages and data
+
+Load packages:
+
+```{r, message=FALSE}
+library(readtext)
+library(quanteda)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(haven)
+library(readxl)
+library(magrittr)
+library(stm)
+library(readr)
+```
+
+Load data (from original CSV file), specifying which column contains stories. Function "readtext" from the eponymous package simplifies the loading of text data (see https://github.com/kbenoit/readtext ). 
+
+```{r}
+moldova_foi <- readtext("foimoldova2015_Standard.csv",text_field = "Your experience")
+```
+
+# Step 2: Preparing data
+
+## Step 2.1: Creating 'corpus'
+
+Create a "corpus" object for analysis (see https://en.wikipedia.org/wiki/Text_corpus for general introduction to the concept):
+
+```{r}
+moldova_corpus <- corpus(moldova_foi)
+```
+
+## Step 2.2: Pre-processing data
+
+Transform the corpus into separate words (tokens) and perform basic pre-processing: 
+
+```{r}
+tok <- tokens(moldova_corpus, what = "word",
+              remove_punct = TRUE,
+              remove_symbols = TRUE,
+              remove_numbers = TRUE,
+              remove_twitter = TRUE,
+              remove_url = TRUE,
+              remove_hyphens = TRUE,
+              verbose = TRUE)
+```
+
+This allows to remove any digits and punctuation, that may be part of tokens through mistakes in text conversion and input; to remove any tokens containing less than three characters long (picks up some other mistakes and typos); to convert everything into lower case. A "regular expression" (regex) function is used here (see https://en.wikipedia.org/wiki/Regular_expression)
+
+```{r}
+tok.m <- tokens_select(tok, c("[\\d-]", "^.{1,2}$", "[[:punct:]]"), 
+                       selection = "remove", 
+                    valuetype="regex", verbose = TRUE)
+
+tok.r <- tokens_tolower(tok.m)
+
+```
+
+To remove "stop words" (not carrying functional meaning) "smart" list is used (see http://docs.quanteda.io/reference/stopwords.html )
+
+```{r}
+toks2 <- tokens_remove(tok.r, stopwords("SMART"), padding = TRUE,
+                       verbose = TRUE)
+```
+
+If an automatic translation systems (e.g. Google Translate) is used, not all words can be translated (e.g. proper names, places). Such non-Enlish tokens can be removed using regex functions.
+
+```{r}
+toks2 <- tokens_select(toks2, "[^ -~]", selection = "remove", 
+                       valuetype = "regex", case_insensitive = TRUE, padding = TRUE, 
+                       verbose = TRUE)
+
+```
+
+## Step 2.3: Creating document feature matrix (DFM)
+
+A document feature matrix (aka document term matrix) or DFM is a fundamental input into natural language processing (see https://en.wikipedia.org/wiki/Document-term_matrix). We construct a DFM from tokens. 
+
+Stemming tokens, removing "padding" (white space where tokens e.g. non-English words were removed previously but space added for analysis of phrases).
+
+```{r}
+dfm <- dfm(toks2, stem=TRUE, verbose = TRUE, remove = "")
+```
+
+Trimming the DFM: dropping tokens appearing less than two times, mainly to catch typos and text conversion mistakes. The logic is that if a token is used only once in all narratives, that could be a feature that does not distinuish well between documents. Alternatively that can be a spelling mistake or typo.
+
+```{r}
+dfm.trim <- dfm_trim(dfm, min_count = 2)
+```
+
+Top 50 tokens that appear most frequently in our DFM. This can be a diagnosis if there are some erroneous features appearing. For example, if non-English words still appear despite corresponding pre-processing. Changing "decreasing = FALSE" results in listing least frequent features in DFM.
+
+```{r}
+topfeatures(dfm.trim, n = 50, decreasing = TRUE)
+
+```
+
+Total number of tokens in DFM, shows the size of the DFM for analysis.
+
+```{r}
+nfeature(dfm.trim)
+```
+
+# Step 3: Data Exploration
+
+## 3.1 Frequency analysis
+
+```{r}
+freq <- textstat_frequency(dfm.trim)
+freq
+```
+
+Visualising frequencies with a plot of 20 most frequent words:
+
+```{r}
+ggplot(freq[1:30, ], aes(x = reorder(feature, frequency), y = frequency)) +
+    geom_point() +
+    coord_flip() +
+    labs(x = NULL, y = "Frequency")
+```
+
+Visualising frequencies with a plot of 20 most frequent words (traditional word cloud)
+
+```{r}
+textplot_wordcloud(dfm.trim, max.words=30, scale=c(3,1), random.order=FALSE)
+```
+
+## 3.2 Keyness analysis
+
+Exploring which key terms appear in the corpus more frequently than by chance (see https://en.wikipedia.org/wiki/Keyword_(linguistics); http://docs.quanteda.io/reference/textstat_keyness.html)
+
+Assessing keyness between females and males: first, "target" document needs to be identified ("target" refers to the gender variable in the original CSV dataset ); second, if keyness among 'male' respondents is looked at, 'female' respondents serve as baseline. The outputs are sorted in descending order by the association measure (chi2 here).
+
+```{r}
+keyness_gender <- textstat_keyness(dfm.trim, 
+                                   docvars(moldova_corpus, "DQ2.Gender") == "male", 
+                                   sort = TRUE)
+keyness_gender
+```
+
+To visualise keyness between males and females (see http://docs.quanteda.io/reference/textplot_keyness.html). "Reference" refers to keywords usage by female respondents; "text1" - by male respondents.
+
+```{r}
+textplot_keyness(keyness_gender, show_reference = TRUE, n = 20L, min_count = 2L)
+```
+
+Example of assessing keyness between rural and urban areas: 
+
+```{r}
+keyness_urban <- textstat_keyness(dfm.trim, 
+                                   docvars(moldova_corpus, "DQ5.Live") == "urban area", 
+                                   sort = TRUE)
+keyness_urban
+```
+
+To visualise keyness between urban and rural areas:
+
+```{r}
+textplot_keyness(keyness_urban, show_reference = TRUE, n = 20L, min_count = 2L)
+```
+
+## 3.3 Word and document similarity
+
+A basis of NLP is that words populate the vector space (see  https://en.wikipedia.org/wiki/Vector_space_model) and simple geometry can be used to assess similarities between words and equivalently distances. 
+
+For example, if the word "work" is of interest, words people use that are the closest to "work" can be identified - one way to think about it is in terms of semantic similarity. Here the cosine similarity measure (and Euclidean distance below) is used (see 
+http://docs.quanteda.io/reference/textstat_simil.html)
+
+```{r}
+work_simil <- textstat_simil(dfm.trim, "work", method = "cosine", margin = "features")
+as.list(work_simil, n = 15)
+```
+
+The words respondents use that are the distant to the word "work":
+
+```{r}
+work_dist <- textstat_dist(dfm.trim, "work", method = "euclidean", margin = "features")
+as.list(work_dist, n = 15)
+```
+
+## 3.4 Keyword in context (KWIC)
+
+A useful way to see the context of a keyword is to use KWIC (see http://docs.quanteda.io/reference/kwic.html) .
+
+For example, if the focus is on the words "work", "salary", and "job", a small dictionary with these three words can be created (see http://docs.quanteda.io/reference/dictionary.html). Here, specifying valuetypes when creating dictionary ("work*", "salar*", "job*") allows to pick up any versions of tokens.
+
+```{r}
+dict <- dictionary(list(us = c("work*", "salar*", "job*")))
+phrase(dict)
+```
+
+```{r}
+kwic_work <- kwic(moldova_corpus, dict, window = 5, valuetype = "glob")
+head(kwic_work, n =10)
+```
+
+Frequency analysis discussed earlier can also be used here to see the most frequent words appearing in the context of "work". To do so, the tokens are cleaned and a DFM of the "work"-related tokens is created (but removing our work-related dictionary terms): 
+
+```{r}
+tok.work <- tokens(as.tokens(kwic_work), what = "word",
+              remove_punct = TRUE,
+              remove_symbols = TRUE,
+              remove_numbers = TRUE,
+              remove_twitter = TRUE,
+              remove_url = TRUE,
+              remove_hyphens = TRUE,
+              verbose = TRUE)
+
+dfm.work <- dfm(tok.work, 
+                tolower = TRUE,
+           remove= c(stopwords("SMART"), "work*", "job*", "salary*"),
+           verbose = TRUE)
+
+```
+
+To create frequencies: 
+
+```{r}
+freq_work <- textstat_frequency(dfm.work)
+freq_work
+```
+
+To visulaise frequencies with a word cloud:
+
+```{r}
+textplot_wordcloud(dfm.work, scale=c(3,.5), random.order=FALSE)
+```
+
+## 3.5 Structural topic modeling
+
+Structural topic model or STM (Roberts et al., 2015) is a type of probabilistic topic models (Blei et al. 2003) that allows to assess the effect of covariates (see http://www.structuraltopicmodel.com; for an introduction and a nice overview of topic modeling see http://www.cs.columbia.edu/~blei/papers/Blei2012.pdf).
+
+For example, STM allows to see whether gender has an effect on the content of narratives (topic prevalence).
+
+First, we convert a DFM into a format that is used by the "stm" package:
+
+```{r}
+stm.dfm <- convert(dfm.trim, to = "stm",  docvars = docvars(moldova_corpus))
+```
+
+### 3.5.1 Searching for optimal number of topics
+
+One key input into the topic modeling algorithm is specifying the number of topics the algorithm needs to uncover in the corpus. This can be done with a manual input, using human expert judgement to determine the number of topics. Alternatively, this can be done by focusing on semantic coherence (see Mimno et al., 2011) and exclusivity (see Bischof and Airoldi, 2012) measures. Highly frequent words in a given topic that don't appear too often in other topics are said to make that topic exclusive. Cohesive and exclusive topics are more semantically useful. 
+
+The steps are: generate a set of candidate models, here ranging between 3 and 10; plot exclusivity and semantic coherence; and choose the optimal number of topics as a balance between these two measures (see Roberts et al., 2015).
+
+```{r}
+search <- searchK(stm.dfm$documents, stm.dfm$vocab, 
+                  K = c(3:10),
+                  data = stm.dfm$meta)
+```
+
+Plot the exclusivity and semantic coherence (numbers closer to zero indicate higher coherence), and select a model on the semantic coherence-exclusivity "frontier" (where no model strictly dominates another in terms of semantic coherence and exclusivity).  
+
+```{r}
+par(mar=c(5,4,4,5)+.1)
+plot(search$results$K,search$results$exclus,type="l",col="red", 
+     xlab="Number of topics", ylab="Exclusivity")
+axis(side=1,at=seq(0,50,5))
+abline(v=6, col="green")
+par(new=TRUE)
+plot(search$results$K, search$results$semcoh,
+     type="l",col="blue",xaxt="n",yaxt="n",xlab="",ylab="")
+axis(4)
+mtext("Semantic Coherence",side=4,line=3)
+legend("right",col=c("red","blue"),lty=1,legend=c("excl","sem coh"))
+```
+
+The model with six topics is selected for our analysis (highlighted with vertical line). There's a drop in semantic coherence after $k=6$. The model is also estimated with gender and rural/urban indicator. Both covariates are categorical so they have to come into the model as factor variables. 
+
+```{r}
+
+topics6 <- stm(stm.dfm$documents, stm.dfm$vocab,  
+               prevalence = ~ factor(DQ5.Live) + factor(DQ2.Gender) , 
+               data = stm.dfm$meta, 
+               K = 6, init.type = "Spectral")
+
+```
+
+### 3.5.2 Exploring words associated with each topic
+
+One way to summarize topics is to combine term frequency and exclusivity to that topic into a univariate summary statistic. 
+
+In STM package this is implemented as FREX (see Bischof and Airoldi, 2012 and Airoldi and Bischof, 2016). The logic behind this measure is that both frequency and exclusivity are important factors in determining semantic content of a word and form a two dimensional summary of topical content. FREX is the geometric average of frequency and exclusivity and can be viewed as a univariate measure of topical importance. 
+
+STM authors suggest that nonexclusive words are less likely to carry topic-specific content, while infrequent words occur too rarely to form the semantic core of a topic. FREX is therefore combining information from the most frequent words in the corpus that are also likely to have been generated from the topic of interest to summarize its content. In practice, topic quality is usually evaluated by highest probability words. 
+
+To look at both FREX and highest probability words:
+
+```{r}
+labelTopics(topics6)
+```
+
+Plotting the same:
+
+```{r}
+plot(topics6,type="labels", n = 15, text.cex = .6)
+
+```
+
+### 3.5.3 Graphically displaying estimated topic proportions
+
+```{r}
+plot(topics6,type="summary", xlim = c(0, 1), n = 10, text.cex = .6)
+
+```
+
+### 3.5.4 Comparing topics
+
+If topics have similar top probability words, contrast in words across two topics can be plotted by calculating the difference in probability of a word for the two topics, and normalizing the maximum difference in probability of any word between the two topics. 
+
+To look at comparison between topics 2 and 4:
+
+```{r}
+plot(topics6, type = "perspectives", topics = c(2,4))
+
+```
+
+### 3.5.5 Creating word clouds for topics
+
+To plot top 50 words:
+
+```{r}
+cloud(topics6, topic = NULL, scale = c(3, .25), max.words = 50)
+```
+
+To plot top probability words for Topic 1:
+
+```{r}
+cloud(topics6, topic = 1, scale = c(3, 1), random.order = FALSE,rot.per = .3, max.words = 50)
+```
+
+### 3.5.6 Estimating relationship between metadata and topic prevalence
+
+#### 3.5.6.1: Estimating effect of gender
+
+```{r}
+con.eff <- estimateEffect( ~ factor(DQ2.Gender), 
+                          topics6, meta = stm.dfm$meta, 
+                          uncertainty = "Global")
+
+```
+
+To plot the results of the analysis as the difference in topic proportions for two different values of our factor variable (male vs female). Point estimates and 95% confidence intervals:
+
+```{r}
+plot(con.eff, covariate = "DQ2.Gender",  
+     model = topics6, method = "difference",
+     cov.value1 = "male", cov.value2 = "female", verbose.labels = FALSE, 
+     main = "Effect of Gender")
+```
+
+Figure shows a treatment effect of gender (male==1 vs female==0) in topics 2, 4, and 6. This can be assessed by looking that 95% confidence interval bars do not overlap the zero line, i.e. the effect is statistically distinct from zero. Compared to females, men are more likely to discuss topics 2 and 6, and less likely topic 4. 
+
+#### 3.5.6.2: Estimating effect of rural vs urbal area
+
+```{r}
+con.eff <- estimateEffect( ~ factor(DQ5.Live), 
+                          topics6, meta = stm.dfm$meta, 
+                          uncertainty = "Global")
+
+```
+
+```{r}
+plot(con.eff, covariate = "DQ5.Live",  
+     model = topics6, method = "difference",
+     cov.value1 = "urban area", cov.value2 = "rural area", verbose.labels = FALSE, 
+     main = "Effect of Urban/Rural Divide")
+```
+
+The figure shows a treatment effect of urbanisation (urban area==1 vs rural area==0) in topics 1, 3, 5, and 6. This can be judged by assessing that 95% confidence interval bars do not overlap the zero line, i.e. the effect is statistically distinct from zero. Compared to rural areas, respondents in urban areas are more likely to discuss topics 5 and 6, and less likely topics 1 and 3.
+
+Previous word cloud results of topics can be looked at to assess whether the results hold face validity.
+
+### 3.5.7: Establishing correlation between topics
+
+Positive correlations between topics suggest that both topics are likely to be covered within a narrative.
+
+```{r}
+topic.cor <- topicCorr(topics6)
+plot(topic.cor)
+```
+
+It appears that topics 2 and 1 are linked at the default 0.01 correlation cutoff.
