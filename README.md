@@ -33,4 +33,6 @@ You can also subscribe to the repository if you have [a GitHub account](https://
 
 You can read more about using GitHub with RStudio in Hadley Wickham's _R Packages_ [book Chapter 13](http://r-pkgs.had.co.nz/git.html). 
 
+If you decide to build on the material in this repository, the easiest way is to create a copy of the repo that you can own (called a *fork*), and then clone that fork on your own machine. Hadley Wickham's book (Chapter 13 mentioned above) describes the process in more detail. 
 
+Any contributions via pull requests are also more than welcome.  
