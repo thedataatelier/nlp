@@ -15,11 +15,15 @@ Documents on this page summarise our work on applying natural language processin
 -	[Notebook.Rmd](Notebook.Rmd) - file containing underlying R script in R Markdown format;
 -	[Slides for the webinar](webinar_nlp.pdf).
 
+***
+
 ## Instructions for use of webinar materials
 
 ### License
 
 Webinar materials are distributed under the [MIT License](https://github.com/thedataatelier/nlp/blob/master/LICENSE). This is a permissive license that lets people do anything they want with the code as along as they provide attribution back to us and don’t hold us liable.
+
+***
 
 ###You have three options for using the materials found on this page:  
 
